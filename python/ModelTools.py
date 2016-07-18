@@ -300,14 +300,6 @@ class ModelBuilder(ModelBuilderBase):
             else: raise RuntimeError, "Unsupported pdf %s" % pdf
             if nofloat: 
               self.out.var(n).setAttribute("globalConstrained",True)
-            # set an attribute related to the group(s) this nuisance belongs to
-            if n in groupsFor:
-                groupNames = groupsFor[n]
-                if self.options.verbose > 1:
-                    print 'Nuisance "%(n)s" is assigned to the following nuisance groups: %(groupNames)s' % locals()
-                for groupName in groupNames:
-                    self.out.var(n).setAttribute('group_'+groupName,True)
-            #self.out.var(n).Print('V')
             if n in self.DC.frozenNuisances:
                 self.out.var(n).setConstant(True)
         if self.options.bin:
@@ -331,7 +323,7 @@ class ModelBuilder(ModelBuilderBase):
     def doNuisancesGroups(self):
         # Prepare a dictionary of which group a certain nuisance belongs to
         groupsFor = {}
-        existingNuisanceNames = tuple(set([syst[0] for syst in self.DC.systs]+self.DC.flatParamNuisances.keys())+self.DC.rateParams.keys()+self.discretes)
+        existingNuisanceNames = tuple(set([syst[0] for syst in self.DC.systs]+self.DC.flatParamNuisances.keys()+self.DC.rateParams.keys()+self.DC.discretes))
         for groupName,nuisanceNames in self.DC.groups.iteritems():
             for nuisanceName in nuisanceNames:
                 if nuisanceName not in existingNuisanceNames:
