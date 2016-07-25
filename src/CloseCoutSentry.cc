@@ -1,4 +1,4 @@
-#include "../interface/CloseCoutSentry.h"
+#include "HiggsAnalysis/CombinedLimit/interface/CloseCoutSentry.h"
 
 #include <cstdio>
 #include <cassert>
@@ -56,7 +56,6 @@ void CloseCoutSentry::reallyClear()
         sprintf(buf, "/dev/fd/%d", fdErr_); freopen(buf, "w", stderr);
         open_   = true;
         owner_ = 0;
-        fdOut_ = fdErr_ = 0; 
     }
 }
 

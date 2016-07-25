@@ -5,6 +5,20 @@ from math import *
 ROOFIT_EXPR = "expr"
 ROOFIT_EXPR_PDF = "EXPR"
 
+class SafeWorkspaceImporter():
+    """Class that provides the RooWorkspace::import method, but makes sure we call the proper
+       overload of it, since in ROOT 6 sometimes PyROOT calls the wrong one"""
+    def __init__(self,wsp):
+        self.wsp = wsp
+        self.imp = getattr(wsp,"import")
+    def __call__(self,*args):
+        if len(args) != 1:
+            self.imp(*args)
+        elif args[0].Class().InheritsFrom("RooAbsReal") or args[0].Class().InheritsFrom("RooArgSet") or args[0].Class().InheritsFrom("RooAbsData") or args[0].Class().InheritsFrom("RooCategory"):
+            self.imp(args[0], ROOT.RooCmdArg()) # force the proper overload to be called
+        else:
+            self.imp(*args)
+
 class ModelBuilderBase():
     """This class defines the basic stuff for a model builder, and it's an interface on top of RooWorkspace::factory or HLF files"""
     def __init__(self,options):
@@ -17,7 +31,8 @@ class ModelBuilderBase():
             ROOT.gSystem.Load("libHiggsAnalysisCombinedLimit")
             ROOT.TH1.AddDirectory(False)
             self.out = ROOT.RooWorkspace("w","w");
-            self.out._import = getattr(self.out,"import") # workaround: import is a python keyword
+            #self.out._import = getattr(self.out,"import") # workaround: import is a python keyword
+            self.out._import = SafeWorkspaceImporter(self.out)
             self.out.dont_delete = []
             if options.verbose == 0:
                 ROOT.RooMsgService.instance().setGlobalKillBelow(ROOT.RooFit.ERROR)
@@ -34,10 +49,13 @@ class ModelBuilderBase():
             global ROOFIT_EXPR;
             ROOFIT_EXPR = "cexpr"            
     def factory_(self,X):
+        if self.options.verbose >= 7:
+            print "RooWorkspace::factory('%s')" % X
         if (len(X) > 1000):
             print "Executing factory with a string of length ",len(X)," > 1000, could trigger a bug: ",X
         ret = self.out.factory(X);
         if ret: 
+            if self.options.verbose >= 7: print " ---> ",ret
             self.out.dont_delete.append(ret)
             return ret
         else:
@@ -84,11 +102,13 @@ class ModelBuilder(ModelBuilderBase):
 
         self.physics.preProcessNuisances(self.DC.systs)
         self.doNuisances()
+	self.doExtArgs()
 	self.doRateParams()
         self.doExpectedEvents()
         self.doIndividualModels()
         self.doNuisancesGroups() # this needs to be called after both doNuisances and doIndividualModels
         self.doCombination()
+	self.runPostProcesses()
         self.physics.done()
         if self.options.bin:
             self.doModelConfigs()
@@ -96,6 +116,33 @@ class ModelBuilder(ModelBuilderBase):
             if self.options.verbose > 2: 
                 self.out.pdf("model_s").graphVizTree(self.options.out+".dot", "\\n")
                 print "Wrote GraphVizTree of model_s to ",self.options.out+".dot"
+
+
+    def runPostProcesses(self):
+      for n in self.DC.frozenNuisances:
+         self.out.arg(n).setConstant(True)
+
+    def doExtArgs(self):
+	open_files = {};
+	for rp in self.DC.extArgs.keys():
+	  if self.out.arg(rp): continue
+	  argv = self.DC.extArgs[rp][-1]
+	  fin,wsn = argv.split(":")
+	  if (fin,wsn) in open_files: 
+	        wstmp = open_files[(fin,wsn)]
+	        if not wstmp.arg(rp): 
+	         raise RuntimeError, "No parameter '%s' found for extArg in workspace %s from file %s"%(rp,wsn,fin)
+	        self.out._import(wstmp.arg(rp))
+	  else:
+	    try:
+	      fitmp = ROOT.TFile.Open(fin)
+	      wstmp = fitmp.Get(wsn)
+	      if not wstmp.arg(rp): 
+	       raise RuntimeError, "No parameter '%s' found for extArg in workspace %s from file %s"%(rp,wsn,fin)
+	      self.out._import(wstmp.arg(rp))
+	      open_files[(fin,wsn)] = wstmp
+	    except: 
+	      raise RuntimeError, "No File '%s' found for extArg, or workspace '%s' not in file "%(fin,wsn)
 
     def doRateParams(self):
 
@@ -297,6 +344,8 @@ class ModelBuilder(ModelBuilderBase):
                     self.out.var("%s_In" % n).setConstant(True)
                 globalobs.append("%s_In" % n)
                 #if self.options.optimizeBoundNuisances: self.out.var(n).setAttribute("optimizeBounds")
+	    elif pdf == "extArg" : continue  
+
             else: raise RuntimeError, "Unsupported pdf %s" % pdf
             if nofloat: 
               self.out.var(n).setAttribute("globalConstrained",True)
@@ -323,7 +372,7 @@ class ModelBuilder(ModelBuilderBase):
     def doNuisancesGroups(self):
         # Prepare a dictionary of which group a certain nuisance belongs to
         groupsFor = {}
-        existingNuisanceNames = tuple(set([syst[0] for syst in self.DC.systs]+self.DC.flatParamNuisances.keys()+self.DC.rateParams.keys()+self.DC.discretes))
+        existingNuisanceNames = tuple(set([syst[0] for syst in self.DC.systs]+self.DC.flatParamNuisances.keys()+self.DC.rateParams.keys()+self.extArgs.keys()+self.discretes))
         for groupName,nuisanceNames in self.DC.groups.iteritems():
             for nuisanceName in nuisanceNames:
                 if nuisanceName not in existingNuisanceNames:

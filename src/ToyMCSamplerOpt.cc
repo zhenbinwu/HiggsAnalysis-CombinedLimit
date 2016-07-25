@@ -1,5 +1,5 @@
-#include "../interface/ToyMCSamplerOpt.h"
-#include "../interface/utils.h"
+#include "HiggsAnalysis/CombinedLimit/interface/ToyMCSamplerOpt.h"
+#include "HiggsAnalysis/CombinedLimit/interface/utils.h"
 #include <memory>
 #include <stdexcept>
 #include <TH1.h>
@@ -12,7 +12,7 @@
 #include <RooDataHist.h>
 #include <RooDataSet.h>
 #include <RooRandom.h>
-#include <../interface/ProfilingTools.h>
+#include <HiggsAnalysis/CombinedLimit/interface/ProfilingTools.h>
 #include "RooStats/DetailedOutputAggregator.h"
 
 using namespace std;
@@ -365,7 +365,7 @@ toymcoptutils::SimPdfGenInfo::generate(RooRealVar *&weightVar, const RooDataSet*
                 RooDataSet *wdata = new RooDataSet(data->GetName(), "", obs, "_weight_");
                 for (int i = 0, n = data->numEntries(); i < n; ++i) {
                     obs = *data->get(i);
-                    if (data->weight()) wdata->add(obs, data->weight());
+                    wdata->add(obs, data->weight());
                 }
                 //std::cout << "DataHist was " << std::endl; utils::printRAD(data);
                 delete data;

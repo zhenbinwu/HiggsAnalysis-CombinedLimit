@@ -24,6 +24,7 @@ options.nuisancesToExclude = []
 options.verbose = 0
 options.allowNoSignal = True
 options.allowNoBackground = True
+options.evaluateEdits = False 
 
 if options.nuisVetoFile:
     for line in open(options.nuisVetoFile,"r"):
@@ -34,7 +35,10 @@ from HiggsAnalysis.CombinedLimit.DatacardParser import *
 obsline = []; obskeyline = [] ;
 keyline = []; expline = []; systlines = {}
 signals = []; backgrounds = []; shapeLines = []
-paramSysts = {}; flatParamNuisances = {}; discreteNuisances = {}; groups = {}; rateParams = {};
+paramSysts = {}; flatParamNuisances = {}; discreteNuisances = {}; groups = {}; rateParams = {}; rateParamsOrder = set();
+extArgs = {};
+nuisanceEdits = []; 
+
 cmax = 5 # column width
 if not args:
     raise RuntimeError, "No input datacards specified."
@@ -113,12 +117,15 @@ for ich,fname in enumerate(args):
     # flat params
     for K in DC.flatParamNuisances.iterkeys(): 
         flatParamNuisances[K] = True
+    for K in DC.extArgs.keys(): 
+        extArgs[K] = DC.extArgs[K]
     # rate params
     for K in DC.rateParams.iterkeys():
 	tbin,tproc = K.split("AND")[0],K.split("AND")[1]
 	tbin = label if singlebin else label+tbin 
 	nK = tbin+"AND"+tproc
 	rateParams[nK] = DC.rateParams[K]
+	rateParamsOrder.update(DC.rateParamsOrder)
     # discrete nuisance
     for K in DC.discretes: 
         if discreteNuisances.has_key(K): raise RuntimeError, "Cannot currently correlate discrete nuisances across categories. Rename %s in one."%K
@@ -161,6 +168,20 @@ for ich,fname in enumerate(args):
             groups[groupName].update(set(nuisanceNames))
         else:
             groups[groupName] = set(nuisanceNames)
+    
+    # Finally report nuisance edits propagated to end of card
+    for editline in DC.nuisanceEditLines:
+      if len(editline)==2: nuisanceEdits.append("%s %s"%(editline[0]," ".join(editline[1])))
+      else:
+
+        tmp_chan = editline[2]
+        tmp_proc = editline[1]
+
+      	if tmp_chan == "*": # all channels 
+	  tmp_chan = "%s(%s)"%(label,"|".join(c for c in DC.bins)) if len (DC.bins)>1 else label 
+	if tmp_proc == "*":
+	  tmp_proc = "(%s)"%("|".join(p for p in DC.processes))
+      	nuisanceEdits.append("%s %s %s %s"%(editline[0],tmp_proc,tmp_chan," ".join(editline[3])))
 
 bins = []
 for (b,p,s) in keyline:
@@ -238,9 +259,15 @@ for pname in rateParams.iterkeys():
      print "\n",
 for dname in discreteNuisances.iterkeys(): 
     print "%-12s  discrete" % dname
+for ext in extArgs.iterkeys(): 
+    print "%s" % ' '.join(extArgs[ext])
 for groupName,nuisanceNames in groups.iteritems():
     nuisances = ' '.join(nuisanceNames)
     print '%(groupName)s group = %(nuisances)s' % locals()
+
+nuisanceEdits = set(nuisanceEdits)
+for edit in nuisanceEdits: 
+    print "nuisance edit ", edit
 
 if options.editNuisFile:
     file = open(options.editNuisFile, "r")    

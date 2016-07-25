@@ -1,10 +1,10 @@
-#include "../interface/ProfileLikelihood.h"
+#include "HiggsAnalysis/CombinedLimit/interface/ProfileLikelihood.h"
 #include "RooRealVar.h"
 #include "RooArgSet.h"
 #include "RooRandom.h"
 #include "RooDataSet.h"
 #include "RooFitResult.h"
-#include "../interface/RooMinimizerOpt.h"
+#include "HiggsAnalysis/CombinedLimit/interface/RooMinimizerOpt.h"
 #include "TGraph.h"
 #include "TF1.h"
 #include "TFitResult.h"
@@ -14,11 +14,11 @@
 #include "RooStats/LikelihoodIntervalPlot.h"
 #include "RooStats/HypoTestResult.h"
 #include "RooStats/RooStatsUtils.h"
-#include "../interface/Combine.h"
-#include "../interface/CloseCoutSentry.h"
-#include "../interface/utils.h"
-#include "../interface/ProfiledLikelihoodRatioTestStatExt.h"
-#include "../interface/CascadeMinimizer.h"
+#include "HiggsAnalysis/CombinedLimit/interface/Combine.h"
+#include "HiggsAnalysis/CombinedLimit/interface/CloseCoutSentry.h"
+#include "HiggsAnalysis/CombinedLimit/interface/utils.h"
+#include "HiggsAnalysis/CombinedLimit/interface/ProfiledLikelihoodRatioTestStatExt.h"
+#include "HiggsAnalysis/CombinedLimit/interface/CascadeMinimizer.h"
 
 
 #include <Math/MinimizerOptions.h>
@@ -91,10 +91,10 @@ ProfileLikelihood::MinimizerSentry::MinimizerSentry(const std::string &minimizer
   if (minimizerAlgo.find(",") != std::string::npos) {
       size_t idx = minimizerAlgo.find(",");
       std::string type = minimizerAlgo.substr(0,idx), algo = minimizerAlgo.substr(idx+1);
-      if (verbose > 1) std::cout << "Set default minimizer to " << type << ", algorithm " << algo << std::endl;
+      if (verbose > 1) std::cout << "Set default minimizer to " << type << ", algorithm " << algo << ", tolerance " << tolerance << std::endl;
       ROOT::Math::MinimizerOptions::SetDefaultMinimizer(type.c_str(), algo.c_str());
   } else {
-      if (verbose > 1) std::cout << "Set default minimizer to " << minimizerAlgo << std::endl;
+      if (verbose > 1) std::cout << "Set default minimizer to " << minimizerAlgo << ", tolerance " << tolerance << std::endl;
       ROOT::Math::MinimizerOptions::SetDefaultMinimizer(minimizerAlgo.c_str());
   }
 }

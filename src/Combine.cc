@@ -1,7 +1,7 @@
 /**************************************
   Simple multiChannel significance & limit calculator
 ***************************************/
-#include "../interface/Combine.h"
+#include "HiggsAnalysis/CombinedLimit/interface/Combine.h"
 #include <cstring>
 #include <cerrno>
 #include <iostream>
@@ -49,14 +49,14 @@
 #include <boost/program_options.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 
-#include "../interface/LimitAlgo.h"
-#include "../interface/utils.h"
-#include "../interface/CloseCoutSentry.h"
-#include "../interface/RooSimultaneousOpt.h"
-#include "../interface/ToyMCSamplerOpt.h"
-#include "../interface/AsimovUtils.h"
-#include "../interface/CascadeMinimizer.h"
-#include "../interface/ProfilingTools.h"
+#include "HiggsAnalysis/CombinedLimit/interface/LimitAlgo.h"
+#include "HiggsAnalysis/CombinedLimit/interface/utils.h"
+#include "HiggsAnalysis/CombinedLimit/interface/CloseCoutSentry.h"
+#include "HiggsAnalysis/CombinedLimit/interface/RooSimultaneousOpt.h"
+#include "HiggsAnalysis/CombinedLimit/interface/ToyMCSamplerOpt.h"
+#include "HiggsAnalysis/CombinedLimit/interface/AsimovUtils.h"
+#include "HiggsAnalysis/CombinedLimit/interface/CascadeMinimizer.h"
+#include "HiggsAnalysis/CombinedLimit/interface/ProfilingTools.h"
 
 using namespace RooStats;
 using namespace RooFit;
@@ -134,10 +134,13 @@ Combine::Combine() :
       ("newGenerator", po::value<bool>(&newGen_)->default_value(true), "Use new generator code for toys, fixes all issues with binned and mixed generation (equivalent of --newToyMC but affects the top-level toys from option '-t' instead of the ones within the HybridNew)")
       ("optimizeSimPdf", po::value<bool>(&optSimPdf_)->default_value(true), "Turn on special optimizations of RooSimultaneous. On by default, you can turn it off if it doesn't work for your workspace.")
       ("noMCbonly", po::value<bool>(&noMCbonly_)->default_value(false), "Don't create a background-only modelConfig")
+      ("noDefaultPrior", po::value<bool>(&noDefaultPrior_)->default_value(false), "Don't create a default uniform prior")
       ("rebuildSimPdf", po::value<bool>(&rebuildSimPdf_)->default_value(false), "Rebuild simultaneous pdf from scratch to make sure constraints are correct (not needed in CMS workspaces)")
       ("compile", "Compile expressions instead of interpreting them")
       ("tempDir", po::value<bool>(&makeTempDir_)->default_value(false), "Run the program from a temporary directory (automatically on for text datacards or if 'compile' is activated)")
       ("guessGenMode", "Guess if to generate binned or unbinned based on dataset")
+      ("genBinnedChannels", po::value<std::string>(&genAsBinned_)->default_value(genAsBinned_), "Flag the given channels to be generated binned (irrespectively of how they were flagged at workspace creation)") 
+      ("genUnbinnedChannels", po::value<std::string>(&genAsUnbinned_)->default_value(genAsUnbinned_), "Flag the given channels to be generated unbinned (irrespectively of how they were flagged at workspace creation)") 
       ("trackParameters",   boost::program_options::value<std::string>(&trackParametersNameString_)->default_value(""), "Keep track of parameters in workspace (default = none)")
       ; 
 }
@@ -170,10 +173,13 @@ void Combine::applyOptions(const boost::program_options::variables_map &vm) {
   mass_ = vm["mass"].as<float>();
   saveToys_ = vm.count("saveToys");
   validateModel_ = vm.count("validateModel");
-  if (vm["method"].as<std::string>() == "MultiDimFit" || ( vm["method"].as<std::string>() == "MaxLikelihoodFit" && vm.count("justFit")) || vm["method"].as<std::string>() == "MarkovChainMC") {
+  const std::string &method = vm["method"].as<std::string>();
+  if (method == "MultiDimFit" || ( method == "MaxLikelihoodFit" && vm.count("justFit")) || method == "MarkovChainMC") {
     //CMSDAS new default,
     if (vm["noMCbonly"].defaulted()) noMCbonly_ = 1;
+    if (vm["noDefaultPrior"].defaulted()) noDefaultPrior_ = 1;
   }
+  if (!vm["prior"].defaulted()) noDefaultPrior_ = 0;
 
   expectSignalSet_ = !vm["expectSignal"].defaulted();
   if( vm.count("LoadLibrary") ) {
@@ -335,6 +341,14 @@ void Combine::run(TString hlfFile, const std::string &dataset, double &limit, do
         mc_bonly = new RooStats::ModelConfig(*mc);
         mc_bonly->SetPdf(*model_b);
     }
+    
+    // Specific settings should be executed before user specified ranges!
+    RooRealVar *r = (RooRealVar*)POI->first();
+    if (!isnan(rMin_)) r->setMin(rMin_);
+    if (!isnan(rMax_)) r->setMax(rMax_);
+    if (!isnan(rMin_) || !isnan(rMax_)) {
+     r->setVal(0.5*(r->getMin() + r->getMax()));
+    }
 
     if (snapshotName_ != "") {
       bool loaded = w->loadSnapshot(snapshotName_.c_str());
@@ -349,19 +363,27 @@ void Combine::run(TString hlfFile, const std::string &dataset, double &limit, do
         }
       }
     }
-  //*********************************************
-  //set physics model parameters    after loading the snapshot
-  //*********************************************
-  if (setPhysicsModelParameterExpression_ != "") {
+    
+    if (setPhysicsModelParameterRangeExpression_ != "") {
+      utils::setModelParameterRanges( setPhysicsModelParameterRangeExpression_, w->allVars());
+    }
+    //*********************************************
+    //set physics model parameters    after loading the snapshot
+    //*********************************************
+    if (setPhysicsModelParameterExpression_ != "") {
       RooArgSet allParams(w->allVars());
-      if (w->genobj("discreteParams")) allParams.add(*(RooArgSet*)w->genobj("discreteParams"));
+      //if (w->genobj("discreteParams")) allParams.add(*(RooArgSet*)w->genobj("discreteParams"));
+      allParams.add(w->allCats());
       utils::setModelParameters( setPhysicsModelParameterExpression_, allParams);
       // also allow for "discrete" parameters to be set 
       // Possible that MH value was re-set above, so make sure mass is set to the correct value and not over-ridden later.
       if (w->var("MH")) mass_ = w->var("MH")->getVal();
-  }
+    }
 
   } else {
+    std::cerr << "HLF not validated" << std::endl;
+    assert(0);
+    
     hlf.reset(new RooStats::HLFactory("factory", fileToLoad));
     w = hlf->GetWs();
     if (w == 0) {
@@ -409,6 +431,24 @@ void Combine::run(TString hlfFile, const std::string &dataset, double &limit, do
   const RooArgSet * POI = mc->GetParametersOfInterest();     // not null
   const RooArgSet * nuisances = mc->GetNuisanceParameters(); // note: may be null
   if (dynamic_cast<RooRealVar*>(POI->first()) == 0) throw std::invalid_argument("First parameter of interest is not a RooRealVar");
+
+  if (nuisances && runtimedef::get("ADD_DISCRETE_FALLBACK")) {
+    RooArgSet newNuis;
+    std::string startswith = "u_CMS_Hgg_env_pdf_";
+    TIterator *np = nuisances->createIterator();
+    while (RooRealVar *arg = (RooRealVar*)np->Next()) {
+      if (std::string(arg->GetName()).compare(0, startswith.size(), startswith)) {
+        newNuis.add(*arg);
+      } else {
+        std::cout << "Removed nuisance from set: " << arg->GetName() << "\n";
+      }
+    }
+    if (newNuis.getSize() < nuisances->getSize()) {
+      mc->SetNuisanceParameters(newNuis);
+      if (mc_bonly) mc_bonly->SetNuisanceParameters(newNuis);
+      nuisances = mc->GetNuisanceParameters();
+    }
+  }
 
   if (dataset.find(":") != std::string::npos) {
     std::string filename, wspname, dname;
@@ -470,16 +510,6 @@ void Combine::run(TString hlfFile, const std::string &dataset, double &limit, do
   }
 
 
-  RooRealVar *r = (RooRealVar*)POI->first();
-  if (!isnan(rMin_)) r->setMin(rMin_);
-  if (!isnan(rMax_)) r->setMax(rMax_);
-  if (!isnan(rMin_) || !isnan(rMax_)) {
-    r->setVal(0.5*(r->getMin() + r->getMax()));
-  }
-
-  if (setPhysicsModelParameterRangeExpression_ != "") {
-      utils::setModelParameterRanges( setPhysicsModelParameterRangeExpression_, w->allVars());
-  }
   if (redefineSignalPOIs_ != "") {
       RooArgSet newPOIs(w->argSet(redefineSignalPOIs_.c_str()));
       TIterator *np = newPOIs.createIterator();
@@ -564,7 +594,7 @@ void Combine::run(TString hlfFile, const std::string &dataset, double &limit, do
       }
   }
 
-  if (mc->GetPriorPdf() == 0) {
+  if (mc->GetPriorPdf() == 0 && !noDefaultPrior_) {
       if (prior_ == "flat") {
           RooAbsPdf *prior = new RooUniform("prior","prior",*POI);
           w->import(*prior);
@@ -654,6 +684,11 @@ void Combine::run(TString hlfFile, const std::string &dataset, double &limit, do
       utils::guessChannelMode(dynamic_cast<RooSimultaneous&>(*mc->GetPdf()), *dobs, verbose);
       if (mc_bonly) utils::guessChannelMode(dynamic_cast<RooSimultaneous&>(*mc_bonly->GetPdf()), *dobs, 0);
   }
+  if (!genAsBinned_.empty() || !genAsUnbinned_.empty()) {
+    RooSimultaneous *sim = dynamic_cast<RooSimultaneous*>(genPdf);
+    if (!sim) throw std::invalid_argument("Options genBinnedChannels and genUnbinnedChannels only work for RooSimultaneous pdfs");
+    utils::setChannelGenModes(*sim, genAsBinned_, genAsUnbinned_, verbose);
+  }
   // With the value of r we have to handle four cases:
   //   1) --expectSignal given and r appears in --setPhysicsModelParameters --> prefer expectSignal value but warn user
   //   2) --expectSignal given and r not in --setPhysicsModelParameters --> use --expectSignal value
@@ -704,6 +739,17 @@ void Combine::run(TString hlfFile, const std::string &dataset, double &limit, do
 	  readToysFromHere->ls();
 	  return;
 	}
+        if (toysFrequentist_ && newGen_ && mc->GetGlobalObservables()) {
+            RooAbsCollection *snap = dynamic_cast<RooAbsCollection *>(readToysFromHere->Get("toys/toy_asimov_snapshot"));
+            if (!snap) {
+                std::cerr << "Snapshot of global observables toy_asimov_snapshot not found in " << readToysFromHere->GetName() << ". List follows:\n";
+                readToysFromHere->ls();
+                return;
+            }
+            RooArgSet gobs(*mc->GetGlobalObservables());
+            gobs.assignValueOnly(*snap);
+            w->saveSnapshot("clean", w->allVars());
+        }
       }
       else{
         if (genPdf == 0) throw std::invalid_argument("You can't generate background-only toys if you have no background-only pdf in the workspace and you have set --noMCbonly");
@@ -721,9 +767,9 @@ void Combine::run(TString hlfFile, const std::string &dataset, double &limit, do
                 if (mc->GetGlobalObservables()) {
                     RooArgSet gobs(*mc->GetGlobalObservables());
                     gobs = gobsAsimov;
-                    utils::setAllConstant(*mc->GetParametersOfInterest(), false);
-                    w->saveSnapshot("clean", w->allVars());
                 }
+                utils::setAllConstant(*mc->GetParametersOfInterest(), false);
+                w->saveSnapshot("clean", w->allVars());
             } else {
                 toymcoptutils::SimPdfGenInfo newToyMC(*genPdf, *observables, !unbinned_); 
                 dobs = newToyMC.generateAsimov(weightVar_); // as simple as that
@@ -767,25 +813,25 @@ void Combine::run(TString hlfFile, const std::string &dataset, double &limit, do
     RooDataSet *systDs = 0;
     RooArgSet allFloatingParameters = w->allVars(); 
     allFloatingParameters.remove(*mc->GetParametersOfInterest());
-    int nFloatingNonPoiParameters = utils::countFloating(allFloatingParameters);
+    int nFloatingNonPoiParameters = utils::countFloating(allFloatingParameters); 
     if (nFloatingNonPoiParameters && !toysNoSystematics_ && (readToysFromHere == 0)) {
       if (nuisances == 0) throw std::logic_error("Running with systematics enabled, but nuisances not defined.");
       nuisancePdf.reset(utils::makeNuisancePdf(expectSignal_ ||  setPhysicsModelParameterExpression_ != "" || noMCbonly_ ? *mc : *mc_bonly));
       if (toysFrequentist_) {
           if (mc->GetGlobalObservables() == 0) throw std::logic_error("Cannot use toysFrequentist with no global observables");
           w->saveSnapshot("reallyClean", w->allVars());
-          if (!bypassFrequentistFit_){
+          if (!bypassFrequentistFit_) {
               utils::setAllConstant(*mc->GetParametersOfInterest(), true); 
               if (dobs == 0) throw std::logic_error("Cannot use toysFrequentist with no input dataset");
               CloseCoutSentry sentry(verbose < 3);
               //genPdf->fitTo(*dobs, RooFit::Save(1), RooFit::Minimizer("Minuit2","minimize"), RooFit::Strategy(0), RooFit::Hesse(0), RooFit::Constrain(*(expectSignal_ ?mc:mc_bonly)->GetNuisanceParameters()));	
-               std::auto_ptr<RooAbsReal> nll(genPdf->createNLL(*dobs, RooFit::Constrain(*(expectSignal_ ||  setPhysicsModelParameterExpression_ != "" || noMCbonly_ ? mc:mc_bonly)->GetNuisanceParameters()), RooFit::Extended(genPdf->canBeExtended())));
-               CascadeMinimizer minim(*nll, CascadeMinimizer::Constrained);
-               minim.setStrategy(1);
+                std::auto_ptr<RooAbsReal> nll(genPdf->createNLL(*dobs, RooFit::Constrain(*(expectSignal_ ||  setPhysicsModelParameterExpression_ != "" || noMCbonly_ ? mc:mc_bonly)->GetNuisanceParameters()), RooFit::Extended(genPdf->canBeExtended())));
+                CascadeMinimizer minim(*nll, CascadeMinimizer::Constrained);
+                minim.setStrategy(1);
                 minim.minimize();
+                utils::setAllConstant(*mc->GetParametersOfInterest(), false); 
+                w->saveSnapshot("frequentistPreFit", w->allVars());
           }
-          utils::setAllConstant(*mc->GetParametersOfInterest(), false); 
-          w->saveSnapshot("clean", w->allVars());
           if (nuisancePdf.get()) systDs = nuisancePdf->generate(*mc->GetGlobalObservables(), nToys);
       } else {
           if (nuisancePdf.get()) systDs = nuisancePdf->generate(*nuisances, nToys);
@@ -801,8 +847,8 @@ void Combine::run(TString hlfFile, const std::string &dataset, double &limit, do
 	w->loadSnapshot("clean");
 	if (verbose > 3) utils::printPdf(genPdf);
 	if (withSystematics && !toysNoSystematics_) {
-	  if (systDs) { 
-	  	if (systDs->numEntries()>=iToy)	*vars = *systDs->get(iToy-1); // Somehow, it can be that nuisances is empty and this will only contain a single toy?
+	  if (systDs) {
+	  	if (systDs->numEntries()>=iToy) *vars = *systDs->get(iToy-1);
 	  }
           if (toysFrequentist_) w->saveSnapshot("clean", w->allVars());
 	  if (verbose > 3) utils::printPdf(genPdf);
@@ -944,22 +990,24 @@ void Combine::addDiscreteNuisances(RooWorkspace *w){
         TIterator *dp = discreteParameters->createIterator();
         while (RooAbsArg *arg = (RooAbsArg*)dp->Next()) {
           RooCategory *cat = dynamic_cast<RooCategory*>(arg);
-          if (cat && !cat->isConstant()) {
+          if (cat && (!cat->isConstant() || runtimedef::get("ADD_DISCRETE_FALLBACK"))) {
+            std::cout << "Adding discrete " << cat->GetName() << "\n";
             (CascadeMinimizerGlobalConfigs::O().pdfCategories).add(*arg);
           }
         }
     } 
     // Run through all of the categories in the workspace and look for "pdfindex" -> fall back option 
-    /*else {
+    else if (runtimedef::get("ADD_DISCRETE_FALLBACK")) {
         RooArgSet discreteParameters_C = w->allCats();
         TIterator *dp = discreteParameters_C.createIterator();
         while (RooAbsArg *arg = (RooAbsArg*)dp->Next()) {
          RooCategory *cat = dynamic_cast<RooCategory*>(arg);
          if (! (std::string(cat->GetName()).find("pdfindex") != std::string::npos )) continue;
-         if (cat && !cat->isConstant()) {
+         if (cat/* && !cat->isConstant()*/) {
+            std::cout << "Adding discrete " << cat->GetName() << "\n";
             (CascadeMinimizerGlobalConfigs::O().pdfCategories).add(*arg);
          }
 	}
     }
-    */
+    
 }
