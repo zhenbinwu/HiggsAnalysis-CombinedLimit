@@ -102,6 +102,8 @@ def parseCard(file, options):
                 nprocesses = int(f[1])+1 if f[1] != "*" else -1
             if f[0] == "kmax":
                 nuisances = int(f[1]) if f[1] != "*" else -1
+            if f[0] == "Combination":
+                ret.orgCards = [ i.split("/")[-1].split(".")[0] for i in f[2:]]
             if f[0] == "shapes":
                 if not options.bin: raise RuntimeError, "Can use shapes only with binary output mode"
                 if len(f) < 4: raise RuntimeError, "Malformed shapes line"

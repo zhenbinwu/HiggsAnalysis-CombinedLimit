@@ -39,6 +39,7 @@ class Datacard():
         ## dirct of {name of uncert, boolean to indicate whether this nuisance is floating or not}
         self.frozenNuisances = set()
 
+        self.orgCards = []
 	# Allows for nuisance renaming of "shape" systematics
 	self.systematicsShapeMap = {}
 	
@@ -214,7 +215,7 @@ MB.doModel()
         """
         This is a safe way to determine the histogram name of the uncert template for a given bin and proc.
         """
-        path =  self.path_to_uncert(bin, proc, contact)
+        path =  self.path_to_uncert(bin, proc, resolve)
         if '/' in path :
             return path[path.rfind('/')+1:]
         else :
